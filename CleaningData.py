@@ -20,7 +20,16 @@ data = pl.read_csv('Data/SecurityData.csv').with_columns(pl.when(pl.col('coupon_
                                                            .otherwise(pl.col('ytm')).alias('ytm'),
                                                          pl.when(pl.col('credit_rating') == 'NULL')
                                                            .then(None)
-                                                           .otherwise(pl.col('credit_rating')).alias('credit_rating'))
+                                                           .otherwise(pl.col('credit_rating')).alias('credit_rating'),
+                                                         pl.when(pl.col('duration') == 'NULL')
+                                                           .then(None)
+                                                           .otherwise(pl.col('duration')).alias('duration'),
+                                                         pl.when(pl.col('maturity_date') == 'NULL')
+                                                           .then(None)
+                                                           .otherwise(pl.col('maturity_date')).alias('maturity_date'),
+                                                         pl.when(pl.col('next_call_date') == 'NULL')
+                                                           .then(None)
+                                                           .otherwise(pl.col('next_call_date')).alias('next_call_date'))
 
 # Converting the data to the correct data type since they all came as strings
 data = data.with_columns(pl.col('Date').str.strptime(pl.Date, format = '%m/%d/%Y'),
@@ -28,20 +37,24 @@ data = data.with_columns(pl.col('Date').str.strptime(pl.Date, format = '%m/%d/%Y
                          pl.col('spread').cast(pl.Float32),
                          pl.col('closing_price').cast(pl.Float32),
                          pl.col('current_yield').cast(pl.Float32),
-                         pl.col('ytm').cast(pl.Float32))
+                         pl.col('ytm').cast(pl.Float32),
+                         pl.col('duration').cast(pl.Float32),
+                         pl.col('maturity_date').str.strptime(pl.Date, format = '%m/%d/%Y'),
+                         pl.col('next_call_date').str.strptime(pl.Date, format = '%m/%d/%Y'))
 
-# Filtering out when there is no closing price, credit rating NR, and no ytm
+
+# Filtering out when there is no closing price, credit rating NR, no ytm, and no duration
 data = data.filter(pl.col('closing_price').is_not_null(),
                    pl.col('credit_rating') != 'NR',
-                   pl.col('ytm').is_not_null())
+                   pl.col('ytm').is_not_null(),
+                   pl.col('duration').is_not_null())
 
 # Backfilling missing coupon rates
-data = data.with_columns((pl.when(pl.col('CUSIP') == '83162CSS3').then(4.45).otherwise('coupon_rate')).alias('coupon_rate'))
-data = data.with_columns((pl.when((pl.col('CUSIP') == '90261XHF2') & (pl.col('coupon_rate').is_null())).then(0.8731).otherwise('coupon_rate')).alias('coupon_rate'))
-data = data.with_columns((pl.when((pl.col('CUSIP') == '55608PAN4') & (pl.col('coupon_rate').is_null())).then(0.7611).otherwise('coupon_rate')).alias('coupon_rate'))
-data = data.with_columns((pl.when((pl.col('CUSIP') == '20826FAH9') & (pl.col('coupon_rate').is_null())).then(1.2616).otherwise('coupon_rate')).alias('coupon_rate'))
+data = data.with_columns((pl.when(pl.col('CUSIP') == '12596TAC5').then(2.52).otherwise('coupon_rate')).alias('coupon_rate'))
 # Re-calculating the current yield because the data sometimes incorrectly had 0 instead of Null
-data = data.with_columns((100 * pl.col('coupon_rate') / pl.col('closing_price')).alias('current_yield'))
+# And calculating the modified duration assuming semiannual compounding
+data = data.with_columns((100 * pl.col('coupon_rate') / pl.col('closing_price')).alias('current_yield'),
+                         (pl.col('duration') / (1 + (pl.col('ytm') / 100) / 2)).alias('modified_duration'))
 
 # Separating out if the data is a treasury or not
 # Treasuries are used for hedging and not trading instruments
@@ -98,6 +111,12 @@ no_treasuries = no_treasuries.with_columns(pl.when(pl.col('spread').is_null())
                                              .otherwise(pl.col('spread'))
                                              .alias('spread')).drop(pl.col('spread_right'))
 
+no_treasuries = no_treasuries.select('Date', 'CUSIP', 'asset_type', 'maturity_date', 'next_call_date', 'credit_rating', 
+                                     'coupon_rate', 'closing_price', 'spread', 'current_yield', 'ytm', 'duration', 'modified_duration')
+treasuries = treasuries.select('Date', 'CUSIP', 'asset_type', 'maturity_date', 'next_call_date', 'credit_rating', 
+                               'coupon_rate', 'closing_price', 'spread', 'current_yield', 'ytm', 'duration', 'modified_duration')
+
+
 # Defining the date window we are trading on with a 6 month initialization period
 trade_end = data['Date'].unique()[-1]
 trade_start = trade_end - relativedelta(years = 2) - relativedelta(months = 6)
@@ -115,5 +134,3 @@ no_treasuries.to_pandas().to_excel('Data/CleanData.xlsx', index = False)
 trading_data.to_pandas().to_excel('Data/TradingData.xlsx', index = False)
 treasuries.to_pandas().to_excel('Data/Treasuries.xlsx', index = False)
 trading_treasuries.to_pandas().to_excel('Data/TradingTreasuries.xlsx', index = False)
-trading_cusips.to_pandas().to_excel('Data/TradingCUSIPsList.xlsx', index = False)
-treasury_cusips.to_pandas().to_excel('Data/TreasuryCUSIPsList.xlsx', index = False)
