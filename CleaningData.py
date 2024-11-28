@@ -56,6 +56,22 @@ data = data.with_columns((pl.when(pl.col('CUSIP') == '12596TAC5').then(2.52).oth
 data = data.with_columns((100 * pl.col('coupon_rate') / pl.col('closing_price')).alias('current_yield'),
                          (pl.col('duration') / (1 + (pl.col('ytm') / 100) / 2)).alias('modified_duration'))
 
+duplicates = (data.group_by(['CUSIP', 'Date']).agg(pl.count()).filter(pl.col('count') > 1))
+duplicates_with_data = (data.join(duplicates, on=['CUSIP', 'Date']))
+duplicates_sorted = (duplicates_with_data.sort(['CUSIP', 'Date']))
+unique = duplicates_sorted.unique(subset = ['Date', 'CUSIP'], keep = "last").drop('count')
+data = data.join(unique, on=['Date', 'CUSIP', 'spread', 'modified_duration'], how="anti")
+
+data = data.sort('Date').with_columns((pl.col("Date") - pl.col('Date').shift(1).over('CUSIP')).alias("time_diff"))
+data = data.sort('Date').with_columns(pl.col("CUSIP").is_first_distinct().over("CUSIP").alias('is_first'))
+data = data.with_columns((pl.col('time_diff') > pl.duration(days = 60)).alias('gap_exceeds'))
+# Calculate an incremental counter for each cusip group based on the gap flag
+data = data.with_columns(pl.col('gap_exceeds').cum_sum().over('CUSIP').alias('group_number'))
+# Create the new CUSIP names by combining the original CUSIP and the group number
+data = data.with_columns((pl.col('CUSIP') + "_" + pl.col('group_number').cast(pl.Utf8)).alias('cusip_renamed'))
+data = data.with_columns(pl.when(pl.col('cusip_renamed').is_null()).then(pl.col('CUSIP') + '_0').otherwise('cusip_renamed').alias('CUSIP'))
+data = data.drop('time_diff', 'is_first', 'gap_exceeds', 'group_number', 'cusip_renamed')
+
 # Separating out if the data is a treasury or not
 # Treasuries are used for hedging and not trading instruments
 treasuries = data.filter(pl.col('spread') == 0, pl.col('asset_type') == 'Government').sort('Date')
