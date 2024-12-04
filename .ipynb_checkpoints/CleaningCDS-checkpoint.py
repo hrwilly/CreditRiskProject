@@ -3,16 +3,6 @@ import polars as pl
 def read_and_clean_price(file_path, type):
     price = pl.read_excel(file_path, sheet_id = 2)
 
-    if type == 'IG':
-        price = price.filter(~(pl.col('3Y_price').is_null() & 
-                               pl.col('5Y_price').is_null() &
-                               pl.col('7Y_price').is_null() &
-                               pl.col('10Y_price').is_null()))
-    else:
-        price = price.filter(~(pl.col('3Y_price').is_null() & 
-                               pl.col('5Y_price').is_null() &
-                               pl.col('7Y_price').is_null()))
-
     price = price.sort('Date').fill_null(strategy="backward").with_columns(pl.lit(type).alias('Type'))
 
     if type == 'IG':
@@ -30,8 +20,8 @@ def read_and_clean_price(file_path, type):
 
     return price
 
-IG_price = read_and_clean('Data/CDX IG Price.xlsx', 'IG')
-HY_price = read_and_clean('Data/CDX HY Price.xlsx', 'HY')
+IG_price = read_and_clean_price('Data/CDX IG Price.xlsx', 'IG')
+HY_price = read_and_clean_price('Data/CDX HY Price.xlsx', 'HY')
 
 price = IG_price.join(HY_price, on = ['Date', 'Type', 'Tenor', 'Price'], how = 'full', coalesce = True).sort('Date')
 
@@ -56,8 +46,9 @@ spread = IG_spread.join(HY_spread, on = ['Date', 'Type', 'Tenor', 'Spread'], how
 
 data = price.join(spread, on = ['Date', 'Type', 'Tenor'], how = 'full', coalesce = True).drop_nulls()
 
-data = data.with_columns(((pl.col('Price') - pl.col('Price').shift(1).over('Type', 'Tenor')) / ((pl.col('Spread') / 10000) - (pl.col('Spread').shift(1).over('Type', 'Tenor') / 10000))).alias('dP/dS'))
+data = data.with_columns(((pl.col('Price') - pl.col('Price').shift(1).over('Type', 'Tenor')) / ((pl.col('Spread')) - (pl.col('Spread').shift(1).over('Type', 'Tenor')))).alias('dP/dS'))
 data = data.with_columns((pl.col('dP/dS') / pl.col('Price')).alias('Spread_Duration')).drop_nulls().drop('dP/dS')
-data = data.filter(pl.col('Spread_Duration').is_finite(), pl.col('Spread_Duration') >= 0)
+data = data.filter(pl.col('Spread_Duration').is_finite())
+data = data.with_columns(pl.col('Spread') / 10000)
 
 data.to_pandas().to_excel('Data/TradingCDS.xlsx', index = False)

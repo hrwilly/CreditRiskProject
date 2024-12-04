@@ -33,11 +33,11 @@ data = pl.read_csv('Data/SecurityData.csv').with_columns(pl.when(pl.col('coupon_
 
 # Converting the data to the correct data type since they all came as strings
 data = data.with_columns(pl.col('Date').str.strptime(pl.Date, format = '%m/%d/%Y'),
-                         pl.col('coupon_rate').cast(pl.Float32),
-                         pl.col('spread').cast(pl.Float32),
+                         pl.col('coupon_rate').cast(pl.Float32) / 100,
+                         pl.col('spread').cast(pl.Float32) / 10000,
                          pl.col('closing_price').cast(pl.Float32),
-                         pl.col('current_yield').cast(pl.Float32),
-                         pl.col('ytm').cast(pl.Float32),
+                         pl.col('current_yield').cast(pl.Float32) / 100,
+                         pl.col('ytm').cast(pl.Float32) / 100,
                          pl.col('duration').cast(pl.Float32),
                          pl.col('maturity_date').str.strptime(pl.Date, format = '%m/%d/%Y'),
                          pl.col('next_call_date').str.strptime(pl.Date, format = '%m/%d/%Y'))
